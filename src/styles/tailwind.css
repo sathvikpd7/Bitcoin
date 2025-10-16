@@ -49,6 +49,46 @@
     /* Border Radius */
     --radius: 0.5rem;
   }
+
+  /* Light theme overrides */
+  .light {
+    /* Background Colors */
+    --color-background: #F8FAFC; /* slate-50 */
+    --color-foreground: #0F172A; /* slate-900 */
+    --color-card: #FFFFFF; /* white */
+    --color-card-foreground: #0F172A; /* slate-900 */
+    --color-popover: #FFFFFF; /* white */
+    --color-popover-foreground: #0F172A; /* slate-900 */
+
+    /* Surface Colors */
+    --color-muted: #E2E8F0; /* slate-200 */
+    --color-muted-foreground: #475569; /* slate-600 */
+    --color-border: #CBD5E1; /* slate-300 */
+    --color-input: #FFFFFF; /* white */
+    --color-ring: #2563EB; /* blue-600 */
+
+    /* Primary Colors */
+    --color-primary: #2563EB; /* blue-600 */
+    --color-primary-foreground: #FFFFFF; /* white */
+
+    /* Secondary Colors */
+    --color-secondary: #F1F5F9; /* slate-100 */
+    --color-secondary-foreground: #0F172A; /* slate-900 */
+
+    /* Accent Colors */
+    --color-accent: #059669; /* emerald-600 */
+    --color-accent-foreground: #FFFFFF; /* white */
+
+    /* State Colors */
+    --color-success: #16A34A; /* green-600 */
+    --color-success-foreground: #FFFFFF;
+    --color-warning: #D97706; /* amber-600 */
+    --color-warning-foreground: #FFFFFF;
+    --color-error: #DC2626; /* red-600 */
+    --color-error-foreground: #FFFFFF;
+    --color-destructive: #DC2626; /* red-600 */
+    --color-destructive-foreground: #FFFFFF;
+  }
   
   * {
     @apply border-border;
