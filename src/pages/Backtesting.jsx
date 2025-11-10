@@ -1,22 +1,59 @@
 import React, { useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ApplicationHeader from '../components/ui/ApplicationHeader';
+import { postJson, getApiBaseUrl } from '../utils/api';
 
 const Backtesting = () => {
   const [form, setForm] = useState({ start: '', end: '', strategy: 'directional', cash: 10000 });
   const [results, setResults] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const runBacktest = (e) => {
+  const runBacktest = async (e) => {
     e?.preventDefault();
-    // Stubbed backtest result
-    const equity = [form.cash, form.cash * 1.03, form.cash * 0.98, form.cash * 1.1];
-    setResults({
-      equity,
-      trades: 12,
-      winRate: 58,
-      maxDrawdown: 6.5,
-      sharpe: 1.2
-    });
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl && form.start && form.end) {
+        const response = await postJson('/api/backtest', {
+          start_date: form.start,
+          end_date: form.end,
+          strategy: form.strategy,
+          starting_cash: form.cash
+        });
+        
+        if (response.error) {
+          setError(response.error);
+        } else {
+          setResults(response);
+        }
+      } else {
+        // Fallback to mock data if API not configured
+        const equity = [form.cash, form.cash * 1.03, form.cash * 0.98, form.cash * 1.1];
+        setResults({
+          equity,
+          trades: 12,
+          winRate: 58,
+          maxDrawdown: 6.5,
+          sharpe: 1.2
+        });
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to run backtest');
+      // Fallback to mock data on error
+      const equity = [form.cash, form.cash * 1.03, form.cash * 0.98, form.cash * 1.1];
+      setResults({
+        equity,
+        trades: 12,
+        winRate: 58,
+        maxDrawdown: 6.5,
+        sharpe: 1.2
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -54,10 +91,18 @@ const Backtesting = () => {
                   <button type="button" onClick={() => setForm((f) => ({ ...f, strategy: 'meanreversion' }))} className="px-3 py-1.5 text-xs rounded-md border border-border">Mean Rev</button>
               
                 </div>
-                <button type="submit" className="px-4 py-2 rounded-md bg-primary text-primary-foreground">Run Backtest</button>
+                <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-primary text-primary-foreground disabled:opacity-50">
+                  {isLoading ? 'Running...' : 'Run Backtest'}
+                </button>
               </div>
             </form>
           </div>
+
+          {error && (
+            <div className="bg-card border border-border rounded-lg p-6 shadow-financial">
+              <div className="text-error text-sm">{error}</div>
+            </div>
+          )}
 
           {results && (
             <div className="bg-card border border-border rounded-lg p-6 shadow-financial">

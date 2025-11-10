@@ -1,0 +1,29 @@
+# Model files
+models/*.pkl
+models/*.h5
+models/*.pth
+
+# Data files
+*.csv
+*.json
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+

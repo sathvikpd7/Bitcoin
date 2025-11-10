@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import ApplicationHeader from '../components/ui/ApplicationHeader';
+import { getJson, getApiBaseUrl } from '../utils/api';
 
 const sampleRows = [
   { date: '2024-10-08', open: 62500, high: 63800, low: 61200, close: 63200 },
@@ -12,7 +13,28 @@ const DataExplorer = () => {
   const [rows, setRows] = useState(sampleRows);
   const [sort, setSort] = useState({ key: 'date', dir: 'asc' });
   const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
   const pageSize = 10;
+
+  useEffect(() => {
+    const loadData = async () => {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
+        setIsLoading(true);
+        try {
+          const response = await getJson('/api/data/ohlc?limit=1000');
+          if (response.data && response.data.length > 0) {
+            setRows(response.data);
+          }
+        } catch (err) {
+          console.error('Failed to load data:', err);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    loadData();
+  }, []);
 
   const filtered = useMemo(() => {
     const base = !query ? rows : rows.filter(r => r.date.includes(query));
@@ -59,6 +81,7 @@ const DataExplorer = () => {
           </div>
 
           <div className="bg-card border border-border rounded-lg p-6 shadow-financial overflow-auto">
+            {isLoading && <div className="text-sm text-muted-foreground mb-4">Loading data...</div>}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-muted-foreground">

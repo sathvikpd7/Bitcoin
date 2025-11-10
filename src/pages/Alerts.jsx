@@ -1,19 +1,56 @@
 import React, { useEffect, useState } from 'react';
 import ApplicationHeader from '../components/ui/ApplicationHeader';
+import { postJson, getJson, putJson, deleteJson, getApiBaseUrl } from '../utils/api';
 
 const Alerts = () => {
   const [form, setForm] = useState({ type: 'price', operator: '>=', value: 70000 });
   const [alerts, setAlerts] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    try { setAlerts(JSON.parse(localStorage.getItem('alerts') || '[]')); } catch {}
+    const loadAlerts = async () => {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
+        try {
+          const data = await getJson('/api/alerts');
+          setAlerts(data);
+        } catch (err) {
+          console.error('Failed to load alerts:', err);
+          // Fallback to localStorage
+          try { setAlerts(JSON.parse(localStorage.getItem('alerts') || '[]')); } catch {}
+        }
+      } else {
+        // Fallback to localStorage if API not configured
+        try { setAlerts(JSON.parse(localStorage.getItem('alerts') || '[]')); } catch {}
+      }
+    };
+    loadAlerts();
   }, []);
 
-  const addAlert = (e) => {
+  const addAlert = async (e) => {
     e?.preventDefault();
-    const next = [...alerts, { id: Date.now(), ...form, active: true }];
-    setAlerts(next);
-    try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+    setIsLoading(true);
+    
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
+        const newAlert = await postJson('/api/alerts', form);
+        setAlerts([...alerts, newAlert]);
+      } else {
+        // Fallback to localStorage
+        const next = [...alerts, { id: Date.now(), ...form, active: true }];
+        setAlerts(next);
+        try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+      }
+    } catch (err) {
+      console.error('Failed to create alert:', err);
+      // Fallback to localStorage
+      const next = [...alerts, { id: Date.now(), ...form, active: true }];
+      setAlerts(next);
+      try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const testTrigger = (id) => {
@@ -23,16 +60,48 @@ const Alerts = () => {
     alert(`Test alert: ${a.type.toUpperCase()} ${a.operator} ${a.value}`);
   };
 
-  const toggleActive = (id) => {
-    const next = alerts.map(a => a.id === id ? { ...a, active: !a.active } : a);
-    setAlerts(next);
-    try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+  const toggleActive = async (id) => {
+    const apiBaseUrl = getApiBaseUrl();
+    if (apiBaseUrl) {
+      try {
+        await putJson(`/api/alerts/${id}/toggle`);
+        const next = alerts.map(a => a.id === id ? { ...a, active: !a.active } : a);
+        setAlerts(next);
+      } catch (err) {
+        console.error('Failed to toggle alert:', err);
+        // Fallback to localStorage
+        const next = alerts.map(a => a.id === id ? { ...a, active: !a.active } : a);
+        setAlerts(next);
+        try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+      }
+    } else {
+      // Fallback to localStorage
+      const next = alerts.map(a => a.id === id ? { ...a, active: !a.active } : a);
+      setAlerts(next);
+      try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+    }
   };
 
-  const removeAlert = (id) => {
-    const next = alerts.filter(a => a.id !== id);
-    setAlerts(next);
-    try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+  const removeAlert = async (id) => {
+    const apiBaseUrl = getApiBaseUrl();
+    if (apiBaseUrl) {
+      try {
+        await deleteJson(`/api/alerts/${id}`);
+        const next = alerts.filter(a => a.id !== id);
+        setAlerts(next);
+      } catch (err) {
+        console.error('Failed to delete alert:', err);
+        // Fallback to localStorage
+        const next = alerts.filter(a => a.id !== id);
+        setAlerts(next);
+        try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+      }
+    } else {
+      // Fallback to localStorage
+      const next = alerts.filter(a => a.id !== id);
+      setAlerts(next);
+      try { localStorage.setItem('alerts', JSON.stringify(next)); } catch {}
+    }
   };
 
   return (
@@ -53,7 +122,9 @@ const Alerts = () => {
                 <option>{'<='}</option>
               </select>
               <input type="number" className="px-3 py-2 rounded-md bg-input border border-border text-foreground" value={form.value} onChange={(e) => setForm({ ...form, value: Number(e.target.value || 0) })} />
-              <button type="submit" className="px-4 py-2 rounded-md bg-primary text-primary-foreground">Add Alert</button>
+              <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-primary text-primary-foreground disabled:opacity-50">
+                {isLoading ? 'Adding...' : 'Add Alert'}
+              </button>
             </form>
           </div>
 

@@ -74,12 +74,13 @@ const BitcoinPricePredictor = () => {
 
     try {
       // If API base URL is configured, attempt real API request first
-      if (getApiBaseUrl()) {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
         setLoadingProgress(10);
-        const { prediction: apiPrediction, metrics: apiMetrics } = await postJson('/api/predict', inputData);
+        const response = await postJson('/api/predict', inputData);
         setLoadingProgress(100);
-        setPrediction(apiPrediction);
-        setModelMetrics(apiMetrics);
+        setPrediction(response.prediction);
+        setModelMetrics(response.metrics);
         return;
       }
 

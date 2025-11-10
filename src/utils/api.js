@@ -29,8 +29,65 @@ export async function postJson(path, body, options = {}) {
   return response.json();
 }
 
+export async function getJson(path, options = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Request failed (${response.status}): ${text || response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function putJson(path, body, options = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    body: JSON.stringify(body),
+    ...options
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Request failed (${response.status}): ${text || response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function deleteJson(path, options = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Request failed (${response.status}): ${text || response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export function getApiBaseUrl() {
   return API_BASE_URL;
 }
-
 

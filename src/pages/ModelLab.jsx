@@ -1,9 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import ApplicationHeader from '../components/ui/ApplicationHeader';
+import { getJson, getApiBaseUrl } from '../utils/api';
 
 const ModelLab = () => {
   const [model, setModel] = useState('lstm');
   const [metrics, setMetrics] = useState({ trainingAccuracy: 0.905, validationAccuracy: 0.885, updatedAt: new Date().toISOString() });
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const loadMetrics = async () => {
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
+        setIsLoading(true);
+        try {
+          const data = await getJson('/api/model/metrics');
+          setMetrics({
+            trainingAccuracy: data.trainingAccuracy || 0.905,
+            validationAccuracy: data.validationAccuracy || 0.885,
+            updatedAt: data.updated_at || new Date().toISOString()
+          });
+        } catch (err) {
+          console.error('Failed to load metrics:', err);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    loadMetrics();
+  }, []);
   const [versions, setVersions] = useState([
     { id: 'v1.2.0', note: 'Added dropout, improved validation', date: '2025-09-15' },
     { id: 'v1.1.0', note: 'Baseline LSTM', date: '2025-07-01' }
@@ -43,6 +67,7 @@ const ModelLab = () => {
                 </div>
               </div>
             </div>
+            {isLoading && <div className="text-xs text-muted-foreground mt-2">Loading metrics...</div>}
             <div className="text-xs text-muted-foreground mt-2">Updated: {new Date(metrics.updatedAt).toLocaleString()}</div>
           </div>
 
