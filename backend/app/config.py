@@ -17,8 +17,9 @@ class Settings:
     # ML Model
     ML_MODEL_PATH = os.getenv("ML_MODEL_PATH", "../ml/models/trained_model.pkl")
     
-    # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:4028").split(",")
+    # CORS - Allow multiple origins separated by comma
+    cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:4028,http://127.0.0.1:4028")
+    CORS_ORIGINS = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
     
     # External APIs
     COINGECKO_API_URL = os.getenv("COINGECKO_API_URL", "https://api.coingecko.com/api/v3")

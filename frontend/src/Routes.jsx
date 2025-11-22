@@ -6,7 +6,6 @@ import NotFound from "pages/NotFound";
 import BitcoinPricePredictor from './pages/bitcoin-price-predictor';
 import Settings from 'pages/Settings';
 import Backtesting from 'pages/Backtesting';
-import Alerts from 'pages/Alerts';
 import DataExplorer from 'pages/DataExplorer';
 import ModelLab from 'pages/ModelLab';
 
@@ -21,7 +20,6 @@ const Routes = () => {
         <Route path="/bitcoin-price-predictor" element={<BitcoinPricePredictor />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/backtesting" element={<Backtesting />} />
-        <Route path="/alerts" element={<Alerts />} />
         <Route path="/data-explorer" element={<DataExplorer />} />
         <Route path="/model-lab" element={<ModelLab />} />
         <Route path="*" element={<NotFound />} />

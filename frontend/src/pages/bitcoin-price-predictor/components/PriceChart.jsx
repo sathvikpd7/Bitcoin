@@ -2,6 +2,10 @@ import React, { useMemo } from 'react';
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Customized } from 'recharts';
 
 const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysis" }) => {
+  // Validate data before rendering
+  const isValidData = historicalData && Array.isArray(historicalData) && historicalData.length > 0 && 
+    historicalData.every(d => d && d.date && typeof d.open === 'number' && !isNaN(d.open));
+
   // --- Indicators helpers ---
   const computeSMA = (data, period = 14) => {
     const result = [];
@@ -183,7 +187,10 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
 
   // Combine data with prediction and compute indicators
   const { chartData, sma14, ema14, rsi14, macdData } = useMemo(() => {
-    const base = [...historicalData];
+    if (!isValidData) {
+      return { chartData: [], sma14: [], ema14: [], rsi14: [], macdData: { macd: [], signal: [], histogram: [] } };
+    }
+    const base = [...historicalData].filter(d => d && d.date && typeof d.open === 'number' && !isNaN(d.open));
     if (prediction && historicalData.length) {
       const lastDate = new Date(historicalData[historicalData.length - 1].date);
       const nextDate = new Date(lastDate);
@@ -213,7 +220,7 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
       macdHist: macd.histogram[i]
     }));
     return { chartData: enriched, sma14: sma, ema14: ema, rsi14: rsi, macdData: macd };
-  }, [historicalData, prediction]);
+  }, [historicalData, prediction, isValidData]);
 
   return (
     <div className="bg-card border border-border rounded-lg p-6 shadow-financial">
@@ -240,6 +247,13 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
         </div>
       </div>
       <div className="h-72 sm:h-80 lg:h-96 w-full">
+        {!isValidData || chartData.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">No data available to display</p>
+            </div>
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
@@ -262,16 +276,33 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
               const yAxis = yAxisMap[Object.keys(yAxisMap)[0]];
               const xScale = xAxis?.scale;
               const yScale = yAxis?.scale;
+              
+              // Validate scales exist and are functions
+              if (!xScale || !yScale || typeof xScale !== 'function' || typeof yScale !== 'function') {
+                return null;
+              }
+              
               const candleWidth = 8;
               return (
                 <g>
                   {chartData.map((d, i) => {
-                    if (d.close == null && d.open == null) return null;
-                    const x = xScale(d.date) - candleWidth / 2;
+                    if (!d || (d.close == null && d.open == null)) return null;
+                    if (typeof d.open !== 'number' || isNaN(d.open)) return null;
+                    if (typeof d.high !== 'number' || isNaN(d.high)) return null;
+                    if (typeof d.low !== 'number' || isNaN(d.low)) return null;
+                    
+                    const x = xScale(d.date);
+                    if (x == null || isNaN(x)) return null;
+                    
+                    const xPos = x - candleWidth / 2;
                     const openY = yScale(d.open);
                     const closeY = yScale(d.close ?? d.open);
                     const highY = yScale(d.high);
                     const lowY = yScale(d.low);
+                    
+                    // Validate all y values are numbers
+                    if (isNaN(openY) || isNaN(closeY) || isNaN(highY) || isNaN(lowY)) return null;
+                    
                     const isUp = (d.close ?? d.open) >= d.open;
                     const bodyY = Math.min(openY, closeY);
                     const bodyH = Math.max(2, Math.abs(closeY - openY));
@@ -279,9 +310,9 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
                     return (
                       <g key={`candle-${i}`}>
                         {/* Wick */}
-                        <line x1={x + candleWidth / 2} x2={x + candleWidth / 2} y1={highY} y2={lowY} stroke={color} strokeWidth={1} />
+                        <line x1={xPos + candleWidth / 2} x2={xPos + candleWidth / 2} y1={highY} y2={lowY} stroke={color} strokeWidth={1} />
                         {/* Body */}
-                        <rect x={x} y={bodyY} width={candleWidth} height={bodyH} fill={color} opacity={0.4} stroke={color} />
+                        <rect x={xPos} y={bodyY} width={candleWidth} height={bodyH} fill={color} opacity={0.4} stroke={color} />
                       </g>
                     );
                   })}
@@ -290,19 +321,43 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
             }} />
 
             {/* Overlays */}
-            <Line type="monotone" dataKey="sma14" stroke="var(--color-muted-foreground)" strokeWidth={1.5} dot={false} />
-            <Line type="monotone" dataKey="ema14" stroke="var(--color-warning)" strokeWidth={1.5} dot={false} />
+            <Line 
+              type="monotone" 
+              dataKey="sma14" 
+              stroke="var(--color-muted-foreground)" 
+              strokeWidth={1.5} 
+              dot={false}
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+            <Line 
+              type="monotone" 
+              dataKey="ema14" 
+              stroke="var(--color-warning)" 
+              strokeWidth={1.5} 
+              dot={false}
+              connectNulls={false}
+              isAnimationActive={false}
+            />
 
             {/* Close price line for clarity over candles */}
-            <Line type="monotone" dataKey="close" stroke="var(--color-primary)" strokeWidth={1} dot={false} />
+            <Line 
+              type="monotone" 
+              dataKey="close" 
+              stroke="var(--color-primary)" 
+              strokeWidth={1} 
+              dot={false}
+              connectNulls={false}
+              isAnimationActive={false}
+            />
 
             {/* Predicted series */}
             <Line type="monotone" dataKey="predictedClose" stroke="var(--color-accent)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
 
             {/* Prediction reference line */}
-            {prediction && (
+            {prediction && chartData && chartData.length > 0 && chartData[chartData.length - 1]?.date && (
               <ReferenceLine 
-                x={chartData?.[chartData?.length - 1]?.date} 
+                x={chartData[chartData.length - 1].date} 
                 stroke="var(--color-accent)" 
                 strokeDasharray="3 3"
                 strokeWidth={2}
@@ -310,8 +365,10 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
             )}
           </ComposedChart>
         </ResponsiveContainer>
+        )}
       </div>
       {/* RSI mini-panel */}
+      {isValidData && chartData.length > 0 && (
       <div className="mt-6 h-32 sm:h-36 lg:h-40 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
@@ -325,7 +382,9 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+      )}
       {/* MACD mini-panel */}
+      {isValidData && chartData.length > 0 && (
       <div className="mt-4 h-32 sm:h-36 lg:h-40 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
@@ -340,17 +399,29 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
               const yAxis = yAxisMap[Object.keys(yAxisMap)[0]];
               const xScale = xAxis?.scale;
               const yScale = yAxis?.scale;
+              
+              // Validate scales exist and are functions
+              if (!xScale || !yScale || typeof xScale !== 'function' || typeof yScale !== 'function') {
+                return null;
+              }
+              
               const barWidth = 4;
               return (
                 <g>
                   {chartData.map((d, i) => {
-                    if (d.macdHist == null) return null;
-                    const x = xScale(d.date) - barWidth / 2;
+                    if (!d || d.macdHist == null || typeof d.macdHist !== 'number' || isNaN(d.macdHist)) return null;
+                    const x = xScale(d.date);
+                    if (x == null || isNaN(x)) return null;
+                    
+                    const xPos = x - barWidth / 2;
                     const y0 = yScale(0);
                     const y = yScale(d.macdHist);
+                    
+                    if (isNaN(y0) || isNaN(y)) return null;
+                    
                     const height = Math.max(1, Math.abs(y - y0));
                     const color = d.macdHist >= 0 ? 'var(--color-success)' : 'var(--color-error)';
-                    return <rect key={`macd-bar-${i}`} x={x} y={Math.min(y, y0)} width={barWidth} height={height} fill={color} opacity={0.6} />;
+                    return <rect key={`macd-bar-${i}`} x={xPos} y={Math.min(y, y0)} width={barWidth} height={height} fill={color} opacity={0.6} />;
                   })}
                 </g>
               );
@@ -358,7 +429,9 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+      )}
       {/* Chart Legend */}
+      {isValidData && chartData.length > 0 && (
       <div className="flex flex-wrap items-center justify-center gap-6 mt-4 pt-4 border-t border-border">
         <div className="flex items-center space-x-2">
           <div className="w-4 h-0.5 bg-primary"></div>
@@ -387,6 +460,7 @@ const PriceChart = ({ historicalData, prediction, title = "Bitcoin Price Analysi
           <span className="text-xs text-muted-foreground">SMA(14)</span>
         </div>
       </div>
+      )}
     </div>
   );
 };

@@ -2,6 +2,7 @@ import requests
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.ohlc_data import OHLCData
 from app.config import settings
 
@@ -48,39 +49,126 @@ class DataService:
             return []
     
     def save_ohlc_data(self, db: Session, ohlc_data: List[Dict]) -> int:
-        """Save OHLC data to database"""
+        """Save OHLC data to database (upsert - insert or update)"""
         saved_count = 0
-        for data in ohlc_data:
-            try:
-                date = datetime.fromisoformat(data["date"]).date()
-                existing = db.query(OHLCData).filter(OHLCData.date == date).first()
-                
-                if not existing:
-                    ohlc = OHLCData(
-                        date=date,
-                        open=data["open"],
-                        high=data["high"],
-                        low=data["low"],
-                        close=data["close"],
-                        volume=data.get("volume", 0)
-                    )
-                    db.add(ohlc)
-                    saved_count += 1
-                else:
-                    # Update existing record
-                    existing.open = data["open"]
-                    existing.high = data["high"]
-                    existing.low = data["low"]
-                    existing.close = data["close"]
-                    if "volume" in data:
-                        existing.volume = data["volume"]
-                
-            except Exception as e:
-                print(f"Error saving OHLC data: {e}")
-                continue
+        updated_count = 0
+        error_count = 0
         
-        db.commit()
-        return saved_count
+        # Process records in batches to avoid transaction issues
+        batch_size = 50
+        for i in range(0, len(ohlc_data), batch_size):
+            batch = ohlc_data[i:i + batch_size]
+            for data in batch:
+                try:
+                    date = datetime.fromisoformat(data["date"]).date()
+                    
+                    # Try to get existing record
+                    existing = db.query(OHLCData).filter(OHLCData.date == date).first()
+                    
+                    if existing:
+                        # Update existing record
+                        existing.open = data["open"]
+                        existing.high = data["high"]
+                        existing.low = data["low"]
+                        existing.close = data["close"]
+                        if "volume" in data:
+                            existing.volume = data["volume"]
+                        updated_count += 1
+                    else:
+                        # Insert new record
+                        ohlc = OHLCData(
+                            date=date,
+                            open=data["open"],
+                            high=data["high"],
+                            low=data["low"],
+                            close=data["close"],
+                            volume=data.get("volume", 0)
+                        )
+                        db.add(ohlc)
+                        saved_count += 1
+                
+                except IntegrityError as ie:
+                    # Handle unique constraint violation
+                    db.rollback()
+                    try:
+                        # Record was added between check and insert, update it instead
+                        existing = db.query(OHLCData).filter(OHLCData.date == date).first()
+                        if existing:
+                            existing.open = data["open"]
+                            existing.high = data["high"]
+                            existing.low = data["low"]
+                            existing.close = data["close"]
+                            if "volume" in data:
+                                existing.volume = data["volume"]
+                            updated_count += 1
+                        else:
+                            error_count += 1
+                            print(f"Could not save or update record for date {date}: {ie}")
+                    except Exception as update_error:
+                        error_count += 1
+                        print(f"Error updating record for date {date}: {update_error}")
+                
+                except Exception as e:
+                    error_count += 1
+                    print(f"Error saving OHLC data for date {data.get('date', 'unknown')}: {e}")
+                    db.rollback()
+            
+            # Commit batch
+            try:
+                db.commit()
+            except IntegrityError as commit_ie:
+                db.rollback()
+                # If batch commit fails, try individual commits for this batch
+                for data in batch:
+                    try:
+                        date = datetime.fromisoformat(data["date"]).date()
+                        existing = db.query(OHLCData).filter(OHLCData.date == date).first()
+                        if existing:
+                            existing.open = data["open"]
+                            existing.high = data["high"]
+                            existing.low = data["low"]
+                            existing.close = data["close"]
+                            if "volume" in data:
+                                existing.volume = data["volume"]
+                        else:
+                            ohlc = OHLCData(
+                                date=date,
+                                open=data["open"],
+                                high=data["high"],
+                                low=data["low"],
+                                close=data["close"],
+                                volume=data.get("volume", 0)
+                            )
+                            db.add(ohlc)
+                        db.commit()
+                    except IntegrityError:
+                        # Record already exists, update it
+                        db.rollback()
+                        try:
+                            existing = db.query(OHLCData).filter(OHLCData.date == date).first()
+                            if existing:
+                                existing.open = data["open"]
+                                existing.high = data["high"]
+                                existing.low = data["low"]
+                                existing.close = data["close"]
+                                if "volume" in data:
+                                    existing.volume = data["volume"]
+                                db.commit()
+                        except Exception:
+                            db.rollback()
+                            error_count += 1
+                    except Exception:
+                        db.rollback()
+                        error_count += 1
+            except Exception as commit_error:
+                print(f"Error committing batch: {commit_error}")
+                db.rollback()
+                error_count += len(batch)
+        
+        if error_count > 0:
+            print(f"Warning: {error_count} records failed to save")
+        
+        return saved_count + updated_count
     
     def get_ohlc_data(
         self,

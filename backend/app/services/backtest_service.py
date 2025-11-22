@@ -20,9 +20,30 @@ class BacktestService:
                 db, start_date=start_date, end_date=end_date, limit=1000
             )
             
+            # If no data, try to sync data automatically
+            if not historical_data:
+                try:
+                    # Calculate days needed
+                    from datetime import datetime
+                    start = datetime.fromisoformat(start_date).date()
+                    end = datetime.fromisoformat(end_date).date()
+                    days_needed = (end - start).days + 30  # Add buffer
+                    days_needed = min(max(days_needed, 30), 365)  # Between 30 and 365 days
+                    
+                    # Try to sync data
+                    fetched_data = data_service.fetch_bitcoin_data(days=days_needed)
+                    if fetched_data:
+                        data_service.save_ohlc_data(db, fetched_data)
+                        # Try to get data again
+                        historical_data = data_service.get_ohlc_data(
+                            db, start_date=start_date, end_date=end_date, limit=1000
+                        )
+                except Exception as sync_error:
+                    print(f"Auto-sync failed: {sync_error}")
+            
             if not historical_data:
                 return {
-                    "error": "No historical data available for the selected date range"
+                    "error": f"No historical data available for the selected date range ({start_date} to {end_date}). Please sync data first using the /api/data/sync endpoint."
                 }
             
             # Sort by date ascending
@@ -42,11 +63,14 @@ class BacktestService:
                 next_day = historical_data[i + 1]
                 
                 # Get prediction for current day
+                # Pass historical data up to current point for feature calculation
                 prediction = ml_service.predict(
                     current["open"],
                     current["high"],
                     current["low"],
-                    current["close"]
+                    current["close"],
+                    db=db,
+                    historical_data=historical_data[:i+1]  # Pass data up to current point
                 )
                 
                 predicted_price = prediction["nextClosePrice"]

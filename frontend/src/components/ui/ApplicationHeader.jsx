@@ -40,7 +40,6 @@ const ApplicationHeader = () => {
         { href: '/', label: 'Predictor' },
         { href: '/data-explorer', label: 'Data' },
         { href: '/backtesting', label: 'Backtesting' },
-        { href: '/alerts', label: 'Alerts' },
         { href: '/model-lab', label: 'Model Lab' },
         { href: '/settings', label: 'Settings' }
       ].map((item) => {
@@ -177,7 +176,6 @@ const ApplicationHeader = () => {
                 { href: '/', label: 'Predictor' },
                 { href: '/data-explorer', label: 'Data' },
                 { href: '/backtesting', label: 'Backtesting' },
-                { href: '/alerts', label: 'Alerts' },
                 { href: '/model-lab', label: 'Model Lab' },
                 { href: '/settings', label: 'Settings' }
               ].map((item) => {

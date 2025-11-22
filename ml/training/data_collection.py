@@ -1,49 +1,49 @@
 """
 Data collection script for Bitcoin historical data
-Supports multiple data sources: CoinGecko, Alpha Vantage, yfinance
+Supports multiple data sources: yfinance (primary), Alpha Vantage, CoinGecko
 """
 import pandas as pd
 import requests
 import yfinance as yf
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import Optional
 import os
 
-# Optional: Load environment variables if dotenv is available
+# Optional dotenv support
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    # dotenv not installed, continue without it (API keys can be set as env vars)
     pass
+
 
 class DataCollector:
     def __init__(self):
         self.alpha_vantage_key = os.getenv("ALPHA_VANTAGE_API_KEY")
         self.use_alpha_vantage = os.getenv("USE_ALPHA_VANTAGE", "false").lower() == "true"
-    
+
+    # ----------------------------------------------------------------------
+    # 1. YFINANCE (BEST SOURCE — HIGH ACCURACY, NO API KEY REQUIRED)
+    # ----------------------------------------------------------------------
     def fetch_from_yfinance(self, days: int = 365) -> pd.DataFrame:
         """
-        Fetch Bitcoin data using yfinance (recommended - no API key needed)
-        Returns actual OHLC data
+        Fetch Bitcoin OHLCV data using yfinance.
+        This is the recommended primary data source.
         """
         try:
-            # yfinance uses BTC-USD ticker
             ticker = yf.Ticker("BTC-USD")
-            
-            # Get historical data
+
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
-            
+
             data = ticker.history(start=start_date, end=end_date, interval="1d")
-            
+
             if data.empty:
+                print("yfinance returned empty data.")
                 return pd.DataFrame()
-            
-            # Reset index to get Date as column
-            data.reset_index(inplace=True)
-            
-            # Rename columns to match our schema
+
+            data = data.reset_index()
+
             data.rename(columns={
                 'Date': 'date',
                 'Open': 'open',
@@ -52,28 +52,28 @@ class DataCollector:
                 'Close': 'close',
                 'Volume': 'volume'
             }, inplace=True)
-            
-            # Convert date to string
-            data['date'] = data['date'].dt.strftime('%Y-%m-%d')
-            
-            # Select only needed columns
-            data = data[['date', 'open', 'high', 'low', 'close', 'volume']]
-            
-            return data
-            
+
+            # Ensure correct data format
+            data['date'] = pd.to_datetime(data['date']).dt.strftime('%Y-%m-%d')
+
+            return data[['date', 'open', 'high', 'low', 'close', 'volume']]
+
         except Exception as e:
             print(f"Error fetching from yfinance: {e}")
             return pd.DataFrame()
-    
+
+    # ----------------------------------------------------------------------
+    # 2. ALPHA VANTAGE (REQUIRES API KEY & SLOW — USE ONLY IF ENABLED)
+    # ----------------------------------------------------------------------
     def fetch_from_alpha_vantage(self, days: int = 365) -> pd.DataFrame:
         """
-        Fetch Bitcoin data from Alpha Vantage
-        Requires API key
+        Fetch Bitcoin OHLCV from Alpha Vantage.
+        Requires API key and may be slower.
         """
         if not self.alpha_vantage_key:
-            print("Alpha Vantage API key not found")
+            print("Alpha Vantage API key not found. Skipping.")
             return pd.DataFrame()
-        
+
         try:
             url = "https://www.alphavantage.co/query"
             params = {
@@ -82,24 +82,17 @@ class DataCollector:
                 "market": "USD",
                 "apikey": self.alpha_vantage_key
             }
-            
+
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            
-            if "Error Message" in data:
-                print(f"Alpha Vantage Error: {data['Error Message']}")
-                return pd.DataFrame()
-            
+
             if "Time Series (Digital Currency Daily)" not in data:
-                print("No data returned from Alpha Vantage")
+                print("Alpha Vantage data missing.")
                 return pd.DataFrame()
-            
-            time_series = data["Time Series (Digital Currency Daily)"]
-            
-            # Convert to DataFrame
+
             records = []
-            for date_str, values in time_series.items():
+            for date_str, values in data["Time Series (Digital Currency Daily)"].items():
                 records.append({
                     'date': date_str,
                     'open': float(values['1a. open (USD)']),
@@ -108,24 +101,26 @@ class DataCollector:
                     'close': float(values['4a. close (USD)']),
                     'volume': float(values['5. volume'])
                 })
-            
+
             df = pd.DataFrame(records)
             df = df.sort_values('date')
-            
-            # Filter by days
+
             if days < len(df):
                 df = df.tail(days)
-            
+
             return df
-            
+
         except Exception as e:
             print(f"Error fetching from Alpha Vantage: {e}")
             return pd.DataFrame()
-    
+
+    # ----------------------------------------------------------------------
+    # 3. CoinGecko (FALLBACK — ONLY CLOSE PRICE IS REAL, OHLC APPROXIMATED)
+    # ----------------------------------------------------------------------
     def fetch_from_coingecko(self, days: int = 365) -> pd.DataFrame:
         """
-        Fetch Bitcoin data from CoinGecko (fallback)
-        Only provides close prices, approximates OHLC
+        Fetch Bitcoin from CoinGecko.
+        Provides close prices only; OHLC is approximated.
         """
         try:
             url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
@@ -134,73 +129,80 @@ class DataCollector:
                 "days": days,
                 "interval": "daily"
             }
-            
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
+
+            res = requests.get(url, params=params, timeout=10)
+            res.raise_for_status()
+            data = res.json()
+
             prices = data.get("prices", [])
-            
+            if not prices:
+                print("CoinGecko returned empty data.")
+                return pd.DataFrame()
+
             records = []
             for timestamp, price in prices:
-                date = datetime.fromtimestamp(timestamp / 1000).date()
+                date = datetime.fromtimestamp(timestamp / 1000).strftime('%Y-%m-%d')
                 records.append({
-                    'date': date.isoformat(),
+                    'date': date,
                     'open': price,
-                    'high': price * 1.02,  # Approximate
-                    'low': price * 0.98,    # Approximate
+                    'high': price * 1.02,  # approximate
+                    'low': price * 0.98,   # approximate
                     'close': price,
                     'volume': 0
                 })
-            
-            df = pd.DataFrame(records)
-            return df
-            
+
+            return pd.DataFrame(records)
+
         except Exception as e:
             print(f"Error fetching from CoinGecko: {e}")
             return pd.DataFrame()
-    
+
+    # ----------------------------------------------------------------------
+    # MAIN DATA COLLECTION PIPELINE
+    # ----------------------------------------------------------------------
     def collect_data(self, days: int = 365) -> pd.DataFrame:
         """
-        Collect data from best available source
-        Priority: yfinance > Alpha Vantage > CoinGecko
+        Collect Bitcoin historical OHLCV data.
+        Priority:
+            1. yfinance
+            2. Alpha Vantage (optional)
+            3. CoinGecko (fallback)
         """
-        # Try yfinance first (best, no API key needed)
+        print("Trying yfinance...")
         df = self.fetch_from_yfinance(days)
         if not df.empty:
-            print(f"✓ Collected {len(df)} records from yfinance")
+            print(f"✓ Fetched {len(df)} records from yfinance")
             return df
-        
-        # Try Alpha Vantage if configured
-        if self.use_alpha_vantage and self.alpha_vantage_key:
+
+        if self.use_alpha_vantage:
+            print("Trying Alpha Vantage...")
             df = self.fetch_from_alpha_vantage(days)
             if not df.empty:
-                print(f"✓ Collected {len(df)} records from Alpha Vantage")
+                print(f"✓ Fetched {len(df)} records from Alpha Vantage")
                 return df
-        
-        # Fallback to CoinGecko
+
+        print("Trying CoinGecko...")
         df = self.fetch_from_coingecko(days)
         if not df.empty:
-            print(f"✓ Collected {len(df)} records from CoinGecko (approximate OHLC)")
+            print(f"✓ Fetched {len(df)} records from CoinGecko")
             return df
-        
-        print("✗ Failed to collect data from all sources")
+
+        print("✗ Failed to collect Bitcoin data from all sources.")
         return pd.DataFrame()
 
+
+# ----------------------------------------------------------------------
+# Demo Run
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
     collector = DataCollector()
     data = collector.collect_data(days=365)
-    
+
     if not data.empty:
         print(f"\nData shape: {data.shape}")
-        print(f"\nFirst few rows:")
+        print("\nSample:")
         print(data.head())
-        print(f"\nLast few rows:")
-        print(data.tail())
-        
-        # Save to CSV for inspection
         data.to_csv("bitcoin_data.csv", index=False)
-        print(f"\n✓ Data saved to bitcoin_data.csv")
+        print("\n✓ Saved to bitcoin_data.csv")
     else:
-        print("No data collected")
-
+        print("No data collected.")

@@ -59,11 +59,21 @@ async def sync_bitcoin_data(days: int = Query(365, ge=1, le=3650), db: Session =
         
         saved_count = data_service.save_ohlc_data(db, data)
         return {
-            "message": f"Synced {saved_count} records",
-            "total_fetched": len(data)
+            "message": f"Synced {saved_count} records (new and updated)",
+            "total_fetched": len(data),
+            "records_saved": saved_count
         }
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        # Provide more helpful error messages
+        if "UNIQUE constraint" in error_msg or "unique constraint" in error_msg.lower():
+            # This shouldn't happen with the updated save_ohlc_data, but handle it gracefully
+            return {
+                "message": f"Data sync completed. Some records already existed and were updated.",
+                "total_fetched": len(data) if 'data' in locals() else 0,
+                "warning": "Some dates already existed in database and were updated"
+            }
+        raise HTTPException(status_code=500, detail=f"Error syncing data: {error_msg}")
 

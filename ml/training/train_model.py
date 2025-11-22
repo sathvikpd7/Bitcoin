@@ -1,13 +1,13 @@
 """
 Train XGBoost model for Bitcoin price prediction
 """
-import pandas as pd
-import numpy as np
-import joblib
+import pandas as pd  # type: ignore
+import numpy as np  # type: ignore
+import joblib  # type: ignore
 from pathlib import Path
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import xgboost as xgb
+from sklearn.model_selection import train_test_split  # type: ignore
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score  # type: ignore
+import xgboost as xgb  # type: ignore
 from data_collection import DataCollector
 from feature_engineering import FeatureEngineer
 import warnings
@@ -52,7 +52,6 @@ class ModelTrainer:
         if 'volume' in features.columns:
             exclude_cols.append('volume')
         
-        # Get feature columns (everything except excluded)
         feature_cols = [col for col in features.columns if col not in exclude_cols]
         self.feature_columns = feature_cols
         
@@ -72,7 +71,6 @@ class ModelTrainer:
         print("STEP 3: Model Training")
         print("=" * 60)
         
-        # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42, shuffle=False
         )
@@ -80,9 +78,9 @@ class ModelTrainer:
         print(f"\nTraining set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
         
-        # Create and train XGBoost model
         print("\nTraining XGBoost model...")
         
+        # UPDATED FOR XGBOOST 2.x
         self.model = xgb.XGBRegressor(
             n_estimators=200,
             max_depth=6,
@@ -91,17 +89,17 @@ class ModelTrainer:
             colsample_bytree=0.8,
             random_state=42,
             n_jobs=-1,
-            verbosity=1
+            verbosity=1,
+            eval_metric="rmse"   # moved from fit() to here
         )
         
+        # UPDATED: removed eval_metric from fit()
         self.model.fit(
             X_train, y_train,
             eval_set=[(X_train, y_train), (X_test, y_test)],
-            eval_metric='rmse',
             verbose=True
         )
         
-        # Evaluate model
         print("\n" + "=" * 60)
         print("STEP 4: Model Evaluation")
         print("=" * 60)
@@ -118,7 +116,7 @@ class ModelTrainer:
         train_r2 = r2_score(y_train, y_train_pred)
         test_r2 = r2_score(y_test, y_test_pred)
         
-        # Calculate accuracy (percentage within 2% of actual price)
+        # Accuracy = % within 2% error
         train_accuracy = np.mean(np.abs((y_train - y_train_pred) / y_train) < 0.02) * 100
         test_accuracy = np.mean(np.abs((y_test - y_test_pred) / y_test) < 0.02) * 100
         
@@ -147,7 +145,7 @@ class ModelTrainer:
     
     def save_model(self, model_path: str = "../models/trained_model.pkl"):
         """
-        Save trained model and metadata
+        Save trained model and feature names
         """
         print("\n" + "=" * 60)
         print("STEP 5: Saving Model")
@@ -156,11 +154,9 @@ class ModelTrainer:
         model_dir = Path(model_path).parent
         model_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save model
         joblib.dump(self.model, model_path)
         print(f"\n✓ Model saved to: {model_path}")
         
-        # Save feature columns
         feature_path = model_path.replace('.pkl', '_features.pkl')
         joblib.dump(self.feature_columns, feature_path)
         print(f"✓ Feature columns saved to: {feature_path}")
@@ -168,9 +164,6 @@ class ModelTrainer:
         return model_path
 
 def main():
-    """
-    Main training pipeline
-    """
     print("\n" + "=" * 60)
     print("BITCOIN PRICE PREDICTION - MODEL TRAINING")
     print("=" * 60)
@@ -178,13 +171,10 @@ def main():
     try:
         trainer = ModelTrainer()
         
-        # Prepare data (collect and engineer features)
-        X, y, features_df = trainer.prepare_data(days=730)  # 2 years of data
+        X, y, features_df = trainer.prepare_data(days=730)
         
-        # Train model
         metrics = trainer.train(X, y, test_size=0.2)
         
-        # Save model
         model_path = trainer.save_model()
         
         print("\n" + "=" * 60)
@@ -193,8 +183,7 @@ def main():
         print(f"\n✓ Model saved successfully")
         print(f"✓ Test Accuracy: {metrics['test_accuracy']:.2f}%")
         print(f"✓ Test R² Score: {metrics['test_r2']:.4f}")
-        print(f"\nYou can now use this model in the backend!")
-        print(f"Model location: {model_path}")
+        print(f"\nModel location: {model_path}")
         
     except Exception as e:
         print(f"\n✗ Training failed: {e}")
@@ -206,4 +195,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
-

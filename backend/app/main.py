@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
-from app.routes import predict, backtesting, data, alerts, model
+from app.routes import predict, backtesting, data, model
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -11,20 +11,22 @@ app = FastAPI(
     description="Bitcoin Price Predictor API with ML-powered predictions"
 )
 
-# Configure CORS
+# Configure CORS - Allow all origins for development
+# This ensures the frontend can connect regardless of port or host
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins in development
+    allow_credentials=False,  # Must be False when allow_origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+print("CORS: Configured to allow all origins (development mode)")
 
 # Include routers
 app.include_router(predict.router)
 app.include_router(backtesting.router)
 app.include_router(data.router)
-app.include_router(alerts.router)
 app.include_router(model.router)
 
 @app.on_event("startup")

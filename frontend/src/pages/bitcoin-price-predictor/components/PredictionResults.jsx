@@ -54,8 +54,15 @@ const PredictionResults = ({ prediction, modelMetrics, isVisible }) => {
             />
           </div>
           <h3 className="text-sm font-medium text-muted-foreground mb-2">
-            Predicted Next Close Price
+            {prediction?.predictionDate 
+              ? `Predicted Price for ${new Date(prediction.predictionDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`
+              : 'Predicted Next Close Price'}
           </h3>
+          {prediction?.basedOnDate && (
+            <p className="text-xs text-muted-foreground mb-2">
+              Based on today's price ({new Date(prediction.basedOnDate).toLocaleDateString()})
+            </p>
+          )}
           <div className="text-4xl font-bold text-primary mb-2 data-mono">
             {formatCurrency(prediction?.nextClosePrice)}
           </div>
@@ -157,13 +164,42 @@ const PredictionResults = ({ prediction, modelMetrics, isVisible }) => {
             </div>
           </div>
 
-          <div className="mt-4 p-3 bg-muted/20 rounded-lg">
-            <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-              <Icon name="Info" size={16} />
-              <span>
-                Model trained on {modelMetrics?.dataPoints?.toLocaleString()} historical data points with {modelMetrics?.features} features
-              </span>
-            </div>
+          <div className="mt-4 space-y-2">
+            {modelMetrics && (modelMetrics.dataPoints > 0 || modelMetrics.features > 0) && (
+              <div className="p-3 bg-muted/20 rounded-lg">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <Icon name="Info" size={16} />
+                  <span>
+                    {modelMetrics.dataPoints > 0 
+                      ? `Model trained on ${modelMetrics.dataPoints.toLocaleString()} historical data points`
+                      : 'Model information'}
+                    {modelMetrics.features > 0 && ` with ${modelMetrics.features} features`}
+                  </span>
+                </div>
+              </div>
+            )}
+            
+            {/* Show which model was actually used for this prediction */}
+            {prediction?.model_used && (
+              <div className={`p-3 rounded-lg border ${
+                prediction.model_used === 'trained' 
+                  ? 'bg-success/10 border-success/20' 
+                  : 'bg-warning/10 border-warning/20'
+              }`}>
+                <div className="flex items-center space-x-2 text-sm">
+                  <Icon 
+                    name={prediction.model_used === 'trained' ? 'CheckCircle' : 'AlertCircle'} 
+                    size={16} 
+                    color={prediction.model_used === 'trained' ? 'var(--color-success)' : 'var(--color-warning)'}
+                  />
+                  <span className={prediction.model_used === 'trained' ? 'text-success font-medium' : 'text-warning font-medium'}>
+                    {prediction.model_used === 'trained' 
+                      ? `✅ Using trained ${modelMetrics?.model_type || 'ML'} model for this prediction`
+                      : '⚠️ Using fallback heuristic prediction (trained model not available or incompatible)'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

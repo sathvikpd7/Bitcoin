@@ -1,58 +1,117 @@
 import React, { useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ApplicationHeader from '../components/ui/ApplicationHeader';
-import { postJson, getApiBaseUrl } from '../utils/api';
+import { postJson, getApiBaseUrl, getJson } from '../utils/api';
 
 const Backtesting = () => {
   const [form, setForm] = useState({ start: '', end: '', strategy: 'directional', cash: 10000 });
   const [results, setResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState(null);
+
+  const syncData = async (days = 365) => {
+    setIsSyncing(true);
+    setError(null);
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      if (!apiBaseUrl) {
+        throw new Error('Backend API is not configured. Please configure the API base URL in Settings.');
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/data/sync?days=${days}`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(errorData.detail || `Failed to sync data: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      console.error('Error syncing data:', err);
+      throw err;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const runBacktest = async (e) => {
     e?.preventDefault();
     setIsLoading(true);
     setError(null);
+    setResults(null);
     
     try {
       const apiBaseUrl = getApiBaseUrl();
-      if (apiBaseUrl && form.start && form.end) {
-        const response = await postJson('/api/backtest', {
+      if (!apiBaseUrl) {
+        throw new Error('Backend API is not configured. Please configure the API base URL in Settings to run backtests.');
+      }
+
+      if (!form.start || !form.end) {
+        throw new Error('Please select both start and end dates.');
+      }
+
+      // First, try to run the backtest
+      let response;
+      try {
+        response = await postJson('/api/backtest', {
           start_date: form.start,
           end_date: form.end,
           strategy: form.strategy,
           starting_cash: form.cash
         });
-        
-        if (response.error) {
-          setError(response.error);
+      } catch (backtestError) {
+        // If error is about missing data, try to sync data automatically
+        const errorMessage = backtestError.message || '';
+        if (errorMessage.includes('No historical data') || errorMessage.includes('No price data')) {
+          // Calculate days needed for sync
+          const startDate = new Date(form.start);
+          const endDate = new Date(form.end);
+          const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 30; // Add 30 day buffer
+          const daysToSync = Math.min(Math.max(daysDiff, 30), 365); // Between 30 and 365 days
+          
+          setError('No data available. Syncing historical data...');
+          setIsLoading(false);
+          setIsSyncing(true);
+          
+          try {
+            await syncData(daysToSync);
+            // Retry backtest after syncing
+            setIsSyncing(false);
+            setIsLoading(true);
+            response = await postJson('/api/backtest', {
+              start_date: form.start,
+              end_date: form.end,
+              strategy: form.strategy,
+              starting_cash: form.cash
+            });
+          } catch (syncError) {
+            throw new Error(`Failed to sync data: ${syncError.message}. Please try syncing data manually using the "Sync Data" button.`);
+          }
         } else {
-          setResults(response);
+          throw backtestError;
         }
-      } else {
-        // Fallback to mock data if API not configured
-        const equity = [form.cash, form.cash * 1.03, form.cash * 0.98, form.cash * 1.1];
-        setResults({
-          equity,
-          trades: 12,
-          winRate: 58,
-          maxDrawdown: 6.5,
-          sharpe: 1.2
-        });
       }
+      
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      
+      if (!response || !response.equity) {
+        throw new Error('Invalid response from backtest API');
+      }
+      
+      setResults(response);
     } catch (err) {
-      setError(err.message || 'Failed to run backtest');
-      // Fallback to mock data on error
-      const equity = [form.cash, form.cash * 1.03, form.cash * 0.98, form.cash * 1.1];
-      setResults({
-        equity,
-        trades: 12,
-        winRate: 58,
-        maxDrawdown: 6.5,
-        sharpe: 1.2
-      });
+      console.error('Error running backtest:', err);
+      setError(err.message || 'Failed to run backtest. Please ensure your backend API is running and configured correctly.');
+      setResults(null);
     } finally {
       setIsLoading(false);
+      setIsSyncing(false);
     }
   };
 
@@ -89,18 +148,54 @@ const Backtesting = () => {
                   <button type="button" onClick={() => setForm((f) => ({ ...f, start: '2025-01-01', end: '2025-12-31' }))} className="px-3 py-1.5 text-xs rounded-md border border-border">2025</button>
                   <button type="button" onClick={() => setForm((f) => ({ ...f, strategy: 'directional' }))} className="px-3 py-1.5 text-xs rounded-md border border-border">Directional</button>
                   <button type="button" onClick={() => setForm((f) => ({ ...f, strategy: 'meanreversion' }))} className="px-3 py-1.5 text-xs rounded-md border border-border">Mean Rev</button>
-              
                 </div>
-                <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-primary text-primary-foreground disabled:opacity-50">
-                  {isLoading ? 'Running...' : 'Run Backtest'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button" 
+                    onClick={async () => {
+                      try {
+                        setError(null);
+                        await syncData(365);
+                        setError('Data synced successfully! You can now run backtests.');
+                        setTimeout(() => setError(null), 3000);
+                      } catch (err) {
+                        setError(err.message || 'Failed to sync data');
+                      }
+                    }}
+                    disabled={isSyncing || isLoading}
+                    className="px-4 py-2 rounded-md bg-muted text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    {isSyncing ? 'Syncing...' : 'Sync Data'}
+                  </button>
+                  <button type="submit" disabled={isLoading || isSyncing} className="px-4 py-2 rounded-md bg-primary text-primary-foreground disabled:opacity-50">
+                    {isLoading ? 'Running...' : 'Run Backtest'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
 
           {error && (
+            <div className={`bg-card border border-border rounded-lg p-6 shadow-financial ${
+              error.includes('successfully') ? 'border-success' : 'border-error'
+            }`}>
+              <div className={`text-sm ${error.includes('successfully') ? 'text-success' : 'text-error'}`}>
+                {error}
+              </div>
+              {error.includes('No historical data') && (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Tip: Click "Sync Data" button to fetch historical Bitcoin data from the API.
+                </div>
+              )}
+            </div>
+          )}
+
+          {(isSyncing || (isLoading && error && error.includes('Syncing'))) && (
             <div className="bg-card border border-border rounded-lg p-6 shadow-financial">
-              <div className="text-error text-sm">{error}</div>
+              <div className="flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+                <div className="text-sm text-foreground">Syncing historical Bitcoin data... This may take a moment.</div>
+              </div>
             </div>
           )}
 
