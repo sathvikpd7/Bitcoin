@@ -6,43 +6,42 @@ from typing import Dict, Optional, List
 from pathlib import Path
 from sqlalchemy.orm import Session
 from app.config import settings
-from ta.trend import SMAIndicator, EMAIndicator, MACD
-from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands
+
+# Safe imports for optional dependencies
+try:
+    from ta.trend import SMAIndicator, EMAIndicator, MACD
+    from ta.momentum import RSIIndicator
+    from ta.volatility import BollingerBands
+    TA_AVAILABLE = True
+except ImportError:
+    TA_AVAILABLE = False
+    print("WARNING: ta library not installed. Technical indicators will use fallback calculations.")
 
 class MLService:
     def __init__(self):
         self.model = None
         # Resolve model path relative to backend directory
-        # __file__ is at: backend/app/services/ml_service.py
-        # We need to go: backend/app/services -> backend/app -> backend -> project root
-        backend_dir = Path(__file__).parent.parent.parent  # backend directory
-        project_root = backend_dir.parent  # project root (Bitcoin-main)
+        backend_dir = Path(__file__).parent.parent.parent
+        project_root = backend_dir.parent
         
         model_path_str = settings.ML_MODEL_PATH
         
         # Handle relative paths
         if model_path_str.startswith('../'):
-            # Remove '../' and resolve from project root
-            relative_path = model_path_str[3:]  # Remove '../'
+            relative_path = model_path_str[3:]
             self.model_path = project_root / relative_path
         elif Path(model_path_str).is_absolute():
-            # Absolute path
             self.model_path = Path(model_path_str)
         else:
-            # Relative path from project root
             self.model_path = project_root / model_path_str
         
         self.feature_columns = None
         self.feature_path = self.model_path.parent / f"{self.model_path.stem}_features.pkl"
         
-        # Debug: Print paths for troubleshooting
         print(f"Backend directory: {backend_dir}")
         print(f"Project root: {project_root}")
-        print(f"Model path from config: {model_path_str}")
         print(f"Resolved model path: {self.model_path}")
         print(f"Model path exists: {self.model_path.exists()}")
-        print(f"Feature path: {self.feature_path}")
         print(f"Feature path exists: {self.feature_path.exists()}")
         
         self.load_model()
@@ -54,7 +53,6 @@ class MLService:
                 self.model = joblib.load(self.model_path)
                 print(f"Model loaded from {self.model_path}")
                 
-                # Load feature columns if available
                 if self.feature_path.exists():
                     self.feature_columns = joblib.load(self.feature_path)
                     print(f"Feature columns loaded: {len(self.feature_columns)} features")
@@ -75,10 +73,7 @@ class MLService:
             return a / b if b != 0 else 0
     
     def calculate_features(self, historical_data: List[Dict], current_open: float, current_high: float, current_low: float, current_close: float) -> np.ndarray:
-        """
-        Calculate technical features matching the training script.
-        Requires historical data for indicators like SMA, EMA, RSI, etc.
-        """
+        """Calculate technical features matching the training script."""
         # Validate input values
         if not all([isinstance(v, (int, float)) and not np.isnan(v) and v > 0 
                    for v in [current_open, current_high, current_low, current_close]]):
@@ -86,12 +81,10 @@ class MLService:
             return self._calculate_basic_features(current_open, current_high, current_low, current_close)
         
         if not historical_data or len(historical_data) < 50:
-            # Not enough historical data, return basic features only
             print(f"Warning: Insufficient historical data ({len(historical_data) if historical_data else 0} records), using basic features")
             return self._calculate_basic_features(current_open, current_high, current_low, current_close)
         
         try:
-            # Convert to DataFrame
             df = pd.DataFrame(historical_data)
             if df.empty:
                 return self._calculate_basic_features(current_open, current_high, current_low, current_close)
@@ -99,7 +92,6 @@ class MLService:
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
             df = df.sort_values('date').reset_index(drop=True)
             
-            # Add current data point
             last_volume = df['volume'].iloc[-1] if 'volume' in df.columns and len(df) > 0 else 0
             current_row = pd.DataFrame([{
                 'date': pd.Timestamp.now(),
@@ -114,7 +106,6 @@ class MLService:
             print(f"Error preparing DataFrame: {e}. Using basic features.")
             return self._calculate_basic_features(current_open, current_high, current_low, current_close)
         
-        # Calculate features using same logic as training script
         data = df.copy()
         
         # Basic price features
@@ -138,52 +129,59 @@ class MLService:
         data["log_returns"] = np.log(self.safe_div(data["close"], data["close"].shift(1)))
         
         # Moving averages with error handling
-        try:
-            for period in [7, 14, 30, 50]:
-                data[f"sma_{period}"] = SMAIndicator(close=data["close"], window=period).sma_indicator()
-                data[f"ema_{period}"] = EMAIndicator(close=data["close"], window=period).ema_indicator()
-                data[f"price_vs_sma_{period}"] = self.safe_div((data["close"] - data[f"sma_{period}"]), data[f"sma_{period}"]) * 100
-        except Exception as e:
-            print(f"Error calculating moving averages: {e}")
-            for period in [7, 14, 30, 50]:
-                data[f"sma_{period}"] = data["close"]
-                data[f"ema_{period}"] = data["close"]
-                data[f"price_vs_sma_{period}"] = 0
+        if TA_AVAILABLE:
+            try:
+                for period in [7, 14, 30, 50]:
+                    data[f"sma_{period}"] = SMAIndicator(close=data["close"], window=period).sma_indicator()
+                    data[f"ema_{period}"] = EMAIndicator(close=data["close"], window=period).ema_indicator()
+                    data[f"price_vs_sma_{period}"] = self.safe_div((data["close"] - data[f"sma_{period}"]), data[f"sma_{period}"]) * 100
+            except Exception as e:
+                print(f"Error calculating moving averages: {e}")
+                self._fallback_moving_averages(data)
+        else:
+            self._fallback_moving_averages(data)
         
         # RSI with error handling
-        try:
-            data["rsi_14"] = RSIIndicator(close=data["close"], window=14).rsi()
-        except Exception as e:
-            print(f"Error calculating RSI: {e}")
-            data["rsi_14"] = 50  # Neutral RSI
+        if TA_AVAILABLE:
+            try:
+                data["rsi_14"] = RSIIndicator(close=data["close"], window=14).rsi()
+            except Exception as e:
+                print(f"Error calculating RSI: {e}")
+                data["rsi_14"] = 50
+        else:
+            data["rsi_14"] = 50
         
         # MACD with error handling
-        try:
-            macd = MACD(close=data["close"])
-            data["macd"] = macd.macd()
-            data["macd_signal"] = macd.macd_signal()
-            data["macd_diff"] = macd.macd_diff()
-        except Exception as e:
-            print(f"Error calculating MACD: {e}")
+        if TA_AVAILABLE:
+            try:
+                macd = MACD(close=data["close"])
+                data["macd"] = macd.macd()
+                data["macd_signal"] = macd.macd_signal()
+                data["macd_diff"] = macd.macd_diff()
+            except Exception as e:
+                print(f"Error calculating MACD: {e}")
+                data["macd"] = 0
+                data["macd_signal"] = 0
+                data["macd_diff"] = 0
+        else:
             data["macd"] = 0
             data["macd_signal"] = 0
             data["macd_diff"] = 0
         
         # Bollinger Bands with error handling
-        try:
-            bb = BollingerBands(close=data["close"], window=20)
-            data["bb_high"] = bb.bollinger_hband()
-            data["bb_low"] = bb.bollinger_lband()
-            data["bb_mid"] = bb.bollinger_mavg()
-            data["bb_width"] = self.safe_div((data["bb_high"] - data["bb_low"]), data["bb_mid"]) * 100
-            data["bb_position"] = self.safe_div((data["close"] - data["bb_low"]), (data["bb_high"] - data["bb_low"]))
-        except Exception as e:
-            print(f"Error calculating Bollinger Bands: {e}")
-            data["bb_high"] = data["close"]
-            data["bb_low"] = data["close"]
-            data["bb_mid"] = data["close"]
-            data["bb_width"] = 0
-            data["bb_position"] = 0.5
+        if TA_AVAILABLE:
+            try:
+                bb = BollingerBands(close=data["close"], window=20)
+                data["bb_high"] = bb.bollinger_hband()
+                data["bb_low"] = bb.bollinger_lband()
+                data["bb_mid"] = bb.bollinger_mavg()
+                data["bb_width"] = self.safe_div((data["bb_high"] - data["bb_low"]), data["bb_mid"]) * 100
+                data["bb_position"] = self.safe_div((data["close"] - data["bb_low"]), (data["bb_high"] - data["bb_low"]))
+            except Exception as e:
+                print(f"Error calculating Bollinger Bands: {e}")
+                self._fallback_bollinger_bands(data)
+        else:
+            self._fallback_bollinger_bands(data)
         
         # Volume features
         if "volume" in data.columns and data["volume"].sum() > 0:
@@ -203,30 +201,41 @@ class MLService:
             data[f"volatility_{window}"] = data["returns"].rolling(window=window).std() * np.sqrt(252)
             data[f"mean_return_{window}"] = data["returns"].rolling(window=window).mean()
         
-        # Get last row (current data point)
         last_row = data.iloc[-1:].copy()
-        
-        # Clean NaN and inf
         last_row = last_row.replace([np.inf, -np.inf], np.nan).fillna(0)
         
-        # Extract features matching training script
         exclude_cols = ['date', 'target', 'open', 'high', 'low', 'close']
         if 'volume' in last_row.columns:
             exclude_cols.append('volume')
         
         if self.feature_columns:
-            # Use saved feature columns to ensure correct order
             feature_values = []
             for col in self.feature_columns:
                 if col in last_row.columns:
                     feature_values.append(last_row[col].iloc[0])
                 else:
-                    feature_values.append(0.0)  # Default for missing features
+                    feature_values.append(0.0)
             return np.array(feature_values).reshape(1, -1)
         else:
-            # Fallback: use all columns except excluded ones
             feature_cols = [col for col in last_row.columns if col not in exclude_cols]
             return last_row[feature_cols].values
+    
+    def _fallback_moving_averages(self, data):
+        """Fallback simple moving average calculation"""
+        for period in [7, 14, 30, 50]:
+            data[f"sma_{period}"] = data["close"].rolling(window=period).mean()
+            data[f"ema_{period}"] = data["close"].ewm(span=period, adjust=False).mean()
+            data[f"price_vs_sma_{period}"] = self.safe_div((data["close"] - data[f"sma_{period}"]), data[f"sma_{period}"]) * 100
+    
+    def _fallback_bollinger_bands(self, data):
+        """Fallback Bollinger Bands calculation"""
+        sma = data["close"].rolling(window=20).mean()
+        std = data["close"].rolling(window=20).std()
+        data["bb_high"] = sma + (std * 2)
+        data["bb_low"] = sma - (std * 2)
+        data["bb_mid"] = sma
+        data["bb_width"] = self.safe_div((data["bb_high"] - data["bb_low"]), data["bb_mid"]) * 100
+        data["bb_position"] = self.safe_div((data["close"] - data["bb_low"]), (data["bb_high"] - data["bb_low"]))
     
     def _calculate_basic_features(self, open: float, high: float, low: float, close: float) -> np.ndarray:
         """Calculate basic features when historical data is not available"""
@@ -257,30 +266,24 @@ class MLService:
         predicted_price = None
         
         try:
-            # Try to get historical data for feature calculation
             if historical_data is None:
                 historical_data = []
                 if db is not None:
                     try:
                         from app.services.data_service import data_service
-                        # Get last 100 days of data for indicators
                         historical_data = data_service.get_ohlc_data(db, limit=100)
-                        # Reverse to get chronological order
                         historical_data = list(reversed(historical_data))
                     except Exception as e:
                         print(f"Could not fetch historical data: {e}")
             
-            # Calculate features
             features = self.calculate_features(historical_data, open, high, low, close)
             
-            # Try to use trained model
             if self.model is not None:
                 try:
                     predicted_price = self.model.predict(features)[0]
                     use_model = True
                     print(f"✓ Using trained model for prediction")
                 except Exception as model_error:
-                    # Feature shape mismatch or other model error - use fallback
                     error_msg = str(model_error)
                     print(f"Model prediction failed: {error_msg}")
                     if "feature" in error_msg.lower() or "shape" in error_msg.lower():
@@ -288,31 +291,25 @@ class MLService:
                     use_model = False
         
         except Exception as e:
-            # If anything goes wrong with model, use fallback
             print(f"Error in model prediction: {e}. Using fallback prediction.")
             use_model = False
         
-        # Use fallback prediction
         if not use_model:
             try:
                 avg_price = (open + high + low + close) / 4
                 volatility = ((high - low) / avg_price) * 100 if avg_price > 0 else 0
                 trend = (close - open) / open if open > 0 else 0
                 
-                # Simple trend-following prediction
                 base_change = trend * 0.5 + np.random.normal(0, 0.01)
                 predicted_price = close * (1 + base_change)
             except Exception as e:
-                # Ultimate fallback - just use close price with small random change
                 predicted_price = close * (1 + np.random.normal(0, 0.01))
         
-        # Calculate confidence and metrics
         try:
             avg_price = (open + high + low + close) / 4
             volatility = ((high - low) / avg_price) * 100 if avg_price > 0 else 0
             confidence = max(0.65, min(0.95, 0.85 - (volatility / 100)))
             
-            # Calculate prediction metrics
             price_change = predicted_price - close
             percentage_change = ((predicted_price - close) / close) * 100 if close > 0 else 0
             
@@ -326,7 +323,6 @@ class MLService:
                 "model_used": "trained" if use_model else "fallback"
             }
         except Exception as e:
-            # Final safety net
             return {
                 "nextClosePrice": round(close * 1.01, 2),
                 "priceChange": round(close * 0.01, 2),
@@ -343,7 +339,6 @@ class MLService:
         model_type = "Unknown"
         num_features = len(self.feature_columns) if self.feature_columns else 0
         
-        # Try to determine model type
         if model_loaded:
             model_class = type(self.model).__name__
             if "XGB" in model_class or "XGBoost" in model_class:
@@ -355,7 +350,6 @@ class MLService:
             else:
                 model_type = model_class
         
-        # Get model path status
         model_path_str = str(self.model_path) if self.model_path else "Not configured"
         model_exists = self.model_path.exists() if self.model_path else False
         features_exist = self.feature_path.exists() if self.feature_path else False
@@ -374,6 +368,4 @@ class MLService:
             "updated_at": pd.Timestamp.now().isoformat()
         }
 
-# Singleton instance
 ml_service = MLService()
-

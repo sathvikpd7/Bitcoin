@@ -1,5 +1,6 @@
 """
 Train XGBoost model for Bitcoin price prediction
+FIXED VERSION - Corrected XGBoost 2.x compatibility issues
 """
 import pandas as pd  # type: ignore
 import numpy as np  # type: ignore
@@ -66,6 +67,7 @@ class ModelTrainer:
     def train(self, X: np.ndarray, y: np.ndarray, test_size: float = 0.2):
         """
         Train XGBoost model
+        FIXED: Corrected for XGBoost 2.x compatibility
         """
         print("\n" + "=" * 60)
         print("STEP 3: Model Training")
@@ -80,7 +82,7 @@ class ModelTrainer:
         
         print("\nTraining XGBoost model...")
         
-        # UPDATED FOR XGBOOST 2.x
+        # FIXED FOR XGBOOST 2.x - Removed eval_metric from constructor
         self.model = xgb.XGBRegressor(
             n_estimators=200,
             max_depth=6,
@@ -89,15 +91,14 @@ class ModelTrainer:
             colsample_bytree=0.8,
             random_state=42,
             n_jobs=-1,
-            verbosity=1,
-            eval_metric="rmse"   # moved from fit() to here
+            verbosity=0  # Suppress warnings for cleaner output
         )
         
-        # UPDATED: removed eval_metric from fit()
+        # Train the model - eval_metric handled internally in XGBoost 2.x
         self.model.fit(
             X_train, y_train,
             eval_set=[(X_train, y_train), (X_test, y_test)],
-            verbose=True
+            verbose=False  # Set to True if you want to see training progress
         )
         
         print("\n" + "=" * 60)
@@ -171,6 +172,7 @@ def main():
     try:
         trainer = ModelTrainer()
         
+        # Fetch 2 years of data for better model performance
         X, y, features_df = trainer.prepare_data(days=730)
         
         metrics = trainer.train(X, y, test_size=0.2)
@@ -183,7 +185,8 @@ def main():
         print(f"\n✓ Model saved successfully")
         print(f"✓ Test Accuracy: {metrics['test_accuracy']:.2f}%")
         print(f"✓ Test R² Score: {metrics['test_r2']:.4f}")
-        print(f"\nModel location: {model_path}")
+        print(f"\nYou can now use this model in the backend!")
+        print(f"Model location: {model_path}")
         
     except Exception as e:
         print(f"\n✗ Training failed: {e}")
