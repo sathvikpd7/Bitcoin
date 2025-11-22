@@ -20,13 +20,13 @@ except ImportError:
 class MLService:
     def __init__(self):
         self.model = None
-        # Resolve model path relative to backend directory
+        # Resolve model path using project root and settings.ML_MODEL_PATH
         backend_dir = Path(__file__).parent.parent.parent
         project_root = backend_dir.parent
-        
+
         model_path_str = settings.ML_MODEL_PATH
-        
-        # Handle relative paths
+
+        # Handle relative paths (including ../ml/models/...) consistently
         if model_path_str.startswith('../'):
             relative_path = model_path_str[3:]
             self.model_path = project_root / relative_path
@@ -34,16 +34,17 @@ class MLService:
             self.model_path = Path(model_path_str)
         else:
             self.model_path = project_root / model_path_str
-        
+
         self.feature_columns = None
         self.feature_path = self.model_path.parent / f"{self.model_path.stem}_features.pkl"
-        
+
         print(f"Backend directory: {backend_dir}")
         print(f"Project root: {project_root}")
         print(f"Resolved model path: {self.model_path}")
         print(f"Model path exists: {self.model_path.exists()}")
         print(f"Feature path exists: {self.feature_path.exists()}")
-        
+
+        # Load model and feature columns at service startup
         self.load_model()
     
     def load_model(self):
@@ -52,7 +53,7 @@ class MLService:
             if self.model_path.exists():
                 self.model = joblib.load(self.model_path)
                 print(f"Model loaded from {self.model_path}")
-                
+
                 if self.feature_path.exists():
                     self.feature_columns = joblib.load(self.feature_path)
                     print(f"Feature columns loaded: {len(self.feature_columns)} features")
@@ -131,10 +132,14 @@ class MLService:
         # Moving averages with error handling
         if TA_AVAILABLE:
             try:
+                # Explicitly treat close column as Series for static type checking
+                close_series = pd.Series(data["close"])
                 for period in [7, 14, 30, 50]:
-                    data[f"sma_{period}"] = SMAIndicator(close=data["close"], window=period).sma_indicator()
-                    data[f"ema_{period}"] = EMAIndicator(close=data["close"], window=period).ema_indicator()
-                    data[f"price_vs_sma_{period}"] = self.safe_div((data["close"] - data[f"sma_{period}"]), data[f"sma_{period}"]) * 100
+                    sma_indicator = SMAIndicator(close=close_series, window=period)  # type: ignore[arg-type]
+                    ema_indicator = EMAIndicator(close=close_series, window=period)  # type: ignore[arg-type]
+                    data[f"sma_{period}"] = sma_indicator.sma_indicator()
+                    data[f"ema_{period}"] = ema_indicator.ema_indicator()
+                    data[f"price_vs_sma_{period}"] = self.safe_div((close_series - data[f"sma_{period}"]), data[f"sma_{period}"]) * 100
             except Exception as e:
                 print(f"Error calculating moving averages: {e}")
                 self._fallback_moving_averages(data)
@@ -144,7 +149,9 @@ class MLService:
         # RSI with error handling
         if TA_AVAILABLE:
             try:
-                data["rsi_14"] = RSIIndicator(close=data["close"], window=14).rsi()
+                close_series = pd.Series(data["close"])
+                rsi_indicator = RSIIndicator(close=close_series, window=14)  # type: ignore[arg-type]
+                data["rsi_14"] = rsi_indicator.rsi()
             except Exception as e:
                 print(f"Error calculating RSI: {e}")
                 data["rsi_14"] = 50
@@ -154,10 +161,11 @@ class MLService:
         # MACD with error handling
         if TA_AVAILABLE:
             try:
-                macd = MACD(close=data["close"])
-                data["macd"] = macd.macd()
-                data["macd_signal"] = macd.macd_signal()
-                data["macd_diff"] = macd.macd_diff()
+                close_series = pd.Series(data["close"])
+                macd_indicator = MACD(close=close_series)  # type: ignore[arg-type]
+                data["macd"] = macd_indicator.macd()
+                data["macd_signal"] = macd_indicator.macd_signal()
+                data["macd_diff"] = macd_indicator.macd_diff()
             except Exception as e:
                 print(f"Error calculating MACD: {e}")
                 data["macd"] = 0
@@ -171,12 +179,13 @@ class MLService:
         # Bollinger Bands with error handling
         if TA_AVAILABLE:
             try:
-                bb = BollingerBands(close=data["close"], window=20)
-                data["bb_high"] = bb.bollinger_hband()
-                data["bb_low"] = bb.bollinger_lband()
-                data["bb_mid"] = bb.bollinger_mavg()
+                close_series = pd.Series(data["close"])
+                bb_indicator = BollingerBands(close=close_series, window=20)  # type: ignore[arg-type]
+                data["bb_high"] = bb_indicator.bollinger_hband()
+                data["bb_low"] = bb_indicator.bollinger_lband()
+                data["bb_mid"] = bb_indicator.bollinger_mavg()
                 data["bb_width"] = self.safe_div((data["bb_high"] - data["bb_low"]), data["bb_mid"]) * 100
-                data["bb_position"] = self.safe_div((data["close"] - data["bb_low"]), (data["bb_high"] - data["bb_low"]))
+                data["bb_position"] = self.safe_div((close_series - data["bb_low"]), (data["bb_high"] - data["bb_low"]))
             except Exception as e:
                 print(f"Error calculating Bollinger Bands: {e}")
                 self._fallback_bollinger_bands(data)
@@ -309,12 +318,15 @@ class MLService:
             avg_price = (open + high + low + close) / 4
             volatility = ((high - low) / avg_price) * 100 if avg_price > 0 else 0
             confidence = max(0.65, min(0.95, 0.85 - (volatility / 100)))
-            
-            price_change = predicted_price - close
-            percentage_change = ((predicted_price - close) / close) * 100 if close > 0 else 0
-            
+
+            # Ensure predicted_price is a float for static type checkers
+            predicted_value: float = float(predicted_price) if predicted_price is not None else float(close)
+
+            price_change = predicted_value - close
+            percentage_change = ((predicted_value - close) / close) * 100 if close > 0 else 0
+
             return {
-                "nextClosePrice": round(predicted_price, 2),
+                "nextClosePrice": round(predicted_value, 2),
                 "priceChange": round(price_change, 2),
                 "percentageChange": round(percentage_change, 2),
                 "confidence": round(confidence, 3),
@@ -322,10 +334,12 @@ class MLService:
                 "timestamp": pd.Timestamp.now().isoformat(),
                 "model_used": "trained" if use_model else "fallback"
             }
-        except Exception as e:
+        except Exception:
+            fallback_next = close * 1.01
+            fallback_change = close * 0.01
             return {
-                "nextClosePrice": round(close * 1.01, 2),
-                "priceChange": round(close * 0.01, 2),
+                "nextClosePrice": round(fallback_next, 2),
+                "priceChange": round(fallback_change, 2),
                 "percentageChange": 1.0,
                 "confidence": 0.70,
                 "volatility": 0.02,
